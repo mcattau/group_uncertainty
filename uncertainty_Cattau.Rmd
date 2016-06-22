@@ -1,0 +1,200 @@
+---
+title: "group_uncertainty"
+author: "Megan Cattau"
+date: "June 22, 2016"
+output: html_document
+---
+
+We want to compare data that we collected on the ground with LiDAR-derived raster data
+We need to extract data from a spatial object
+
+
+Ideas: Match stems to pixels, etc.
+
+# Is there a relationship between mismatch between LiDAR-measured vegetation height distributions and ground-measured vegetation height distributions as a function of canopy closure?
+
+Compare height distributions 
+
+
+Load packages and data
+
+```{r load_packages}
+# Check working directory
+getwd()
+
+# Load our packages
+library(raster)
+library(rgdal)
+library(ggplot2)
+library(dplyr)
+library(sp)
+install.packages("hydroGOF")
+library(hydroGOF)
+```
+
+Load LiDAR CHM raster and remove 0s
+```{r load_CHM}
+# Load LiDAR CHM raster
+site_chm<-raster("../NEONdata/D17-California/SJER/2013/lidar/SJER_lidarCHM.tif")
+# look at it
+hist(site_chm)
+
+# set 0 values to no data
+site_chm[site_chm==0]<-NA
+```
+
+Load ground-based measurements
+```{r import-field-measurements}
+# Import csv field data
+site_insitu<-read.csv("../NEONdata/D17-California/SJER/2013/insitu/veg_structure/D17_2013_SJER_vegStr.csv", stringsAsFactors = FALSE) # this is a dataframe
+head(site_insitu)
+```
+
+Load plot locations
+```{r load_plot_locations}
+
+plots<-readOGR("../NEONdata/D17-California/SJER/vector_data/", "SJER_plot_centroids")
+plot(plots)
+str(plots)
+# check to see if there is spatial info
+plots
+```
+
+Make the plots rectangular ploygons - FAIL!
+```{r make-plots-square-fail}
+# Define plot boundaries
+yPlus <- plot_centroids$northing+20
+xPlus <- plot_centroids$easting+20
+yMinus <- plot_centroids$northing-20
+xMinus <- plot_centroids$easting-20
+
+#Extract the plot ID information
+ID=as.character(plot_centroids$Plot_ID) 
+
+#calculate polygon coordinates for each plot centroid. 
+square=cbind(xMinus,yPlus, xPlus,yPlus, xPlus,yMinus, xMinus,yMinus,xMinus,yPlus)
+
+#create spatial polygons
+site_plots <- SpatialPolygons(
+  mapply(
+    function(poly, id) {
+  xy <- matrix(poly, ncol=2, byrow=TRUE)
+  Polygons(list(Polygon(xy)), ID=id)
+}, 
+split(square, row(square)), ID),
+proj4string=CRS(as.character("+proj=utm +zone=11 +datum=WGS84 +units=m +no_defs +ellps=WGS84 +towgs84=0,0,0"))
+)
+
+plot(site_plots)
+plot(site_chm)
+plot(site_plots, add=TRUE)
+```
+
+Extract data from LiDAR CHM raster at plots - max and mean heights
+```{r extract_CHM_from_plots}
+# We're going to extract the mean LiDAR CHM data at the points of the plots
+max_height<-extract(site_chm, 
+                     plots,
+                     buffer=20,
+                     fun=max,# we're going to compare max height, so specify fun = max below. You could compare anything or not include a function to get full distribution
+                     sp=TRUE, # we want a spatial object
+                     stringAsFactors=F # avoid num to characters
+                     )
+plot(max_height)
+max_height@data # this is the dataframe
+
+# We're going to extract the sd LiDAR CHM data at the points of the plots
+mean_height<-extract(site_chm, 
+                     plots,
+                     buffer=20,
+                     fun=mean,# we're going to compare max height, so specify fun = max below. You could compare anything or not include a function to get full distribution
+                     sp=TRUE, # we want a spatial object
+                     stringAsFactors=F # avoid num to characters
+                     )
+plot(mean_height)
+mean_height@data # this is the dataframe
+```
+
+
+Extract mean and tallest tree for each plot 
+```{r field-measurements-stats}
+
+# We need to get mean and max tree height for each plot, so extract mean and max values for each plotid
+insitu_max_stem_height<-site_insitu %>% 
+  group_by(plotid) %>% 
+  summarise(max(stemheight))
+# take the df and group by plot id, and for each group, give max value
+names(insitu_max_stem_height)<-c("plotid", "insitu_maxHt") # rename columns
+
+insitu_mean_stem_height<-site_insitu %>% 
+  group_by(plotid) %>% 
+  summarise(mean(stemheight))
+# take the df and group by plot id, and for each group, give max value
+names(insitu_mean_stem_height)<-c("plotid", "insitu_meanHt") # rename columns
+```
+
+Merge data in spatial df with mean and max stem height table
+```{r merge-data}
+# Merge the data together so each point location has LiDAR CHM and insitu measurements
+merged.max.height<-merge(max_height@data, insitu_max_stem_height, by.x="Plot_ID", by.y="plotid")
+
+merged.mean.height<-merge(mean_height@data, insitu_mean_stem_height, by.x="Plot_ID", by.y="plotid")
+
+
+# plot data
+ggplot(merged.max.height, aes(x=SJER_lidarCHM, y=insitu_maxHt))+geom_point()
+ggplot(merged.mean.height, aes(x=SJER_lidarCHM, y=insitu_meanHt))+geom_point()
+```
+
+
+# quantify error
+```{r quantify-errors}
+# RMSE for mean and max
+rmse(merged.max.height$SJER_lidarCHM, merged.max.height$insitu_maxHt)
+# 3.459163
+mean(merged.max.height$SJER_lidarCHM) #14.46222
+mean(merged.max.height$insitu_maxHt) #13.98333
+# mean plot-level mean canopy height is lower in the measured data than LiDAR
+
+rmse(merged.mean.height$SJER_lidarCHM, merged.mean.height$insitu_meanHt) # 3.939722
+mean(merged.mean.height$SJER_lidarCHM) #7.559299
+mean(merged.mean.height$insitu_meanHt) #5.605737
+# mean plot-level mean canopy height is also lower in the measured data than LiDAR. Statistically?
+
+
+# RMSE is higher with mean canopy height than max canopy height (LiDAR captures max canopy height better than mean canopy heigh), presumably because the data misses understory vegetation
+```
+
+
+# Does RMSE vary ~ plot-level canopy closure?
+```{r make_canopy_closure_variable}
+
+# select what 'tall tree' is
+# use 3rd quartile of each plot
+insitu_stem_height_quartile<-site_insitu %>% 
+  group_by(plotid) %>% 
+  summarise(tall_tree=quantile(stemheight, probs=0.75))
+
+#subset just tall trees
+tall_trees<-c(0)
+site_insitu<-sort(site_insitu$plotid)
+for(i in 1:length(site_insitu)){
+  tall_trees<-ifelse(site_insitu$plotid[i]==site_insitu$plotid[i])
+}
+tall_trees<-site_insitu[site_insitu$stemheight]
+insitu_canopy_closure<-site_insitu %>% 
+  group_by(plotid) %>% 
+  summarise(mean(stemheight))
+# take the df and group by plot id, and for each group, give max value
+names(insitu_mean_stem_height)<-c("plotid", "insitu_meanHt") # rename columns
+```
+
+
+
+
+
+# next: explore outliers to see what's going on
+# canopy closure is canopy diameter of stems over a certain height
+
+
+
