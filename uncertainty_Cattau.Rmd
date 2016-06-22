@@ -169,8 +169,19 @@ mean(merged.mean.height$insitu_meanHt) #5.605737
 # Does RMSE vary ~ plot-level canopy closure?
 ```{r make_canopy_closure_variable}
 
+# select what 'tall tree' is
+# use 3rd quartile of each plot
+insitu_stem_height_quartile<-site_insitu %>% 
+  group_by(plotid) %>% 
+  summarise(tall_tree=quantile(stemheight, probs=0.75))
+
 #subset just tall trees
-tall_trees<-
+tall_trees<-c(0)
+site_insitu<-sort(site_insitu$plotid)
+for(i in 1:length(site_insitu)){
+  tall_trees<-ifelse(site_insitu$plotid[i]==site_insitu$plotid[i])
+}
+tall_trees<-site_insitu[site_insitu$stemheight]
 insitu_canopy_closure<-site_insitu %>% 
   group_by(plotid) %>% 
   summarise(mean(stemheight))
