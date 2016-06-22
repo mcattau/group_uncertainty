@@ -1,0 +1,217 @@
+---
+title: "CHM Group Uncertainty Project"
+author: "Kristin Braziunas"
+date: "June 22, 2016"
+output: html_document
+---
+
+## About
+
+For this project we will be looking at LiDAR-generated Canopy Height Models and looking at uncertainty compared to field measurements of plot-level and tree-level characteristics.
+
+For this project, I am going to be working with data from NEON Domain 01, Harvard Forest Field Site (HARV). I downloaded my data from NEON's figshare site.
+
+Specific characteristics we will be looking at include...
+*Fill this part in
+
+## First, I'm going to load the libraries I need to work with the data.
+
+Also, added additional setup steps in this code chunk.
+
+```{r load-libraries }
+
+library(raster)
+library(rgdal)
+library(dplyr)
+
+# also set stringsasFactors to false
+options(stringsAsFactors = FALSE)
+
+```
+
+## Next, I'm going to load in the canopy height model
+
+```{r import-chm }
+
+site_chm <- raster("../NEONdata/D01-Massachusetts/HARV/2014/lidar/HARV_lidarCHM.tif")
+
+# take a look at it
+plot(site_chm, main="Canopy Height Model\nHARV Field Site")
+hist(site_chm, main="CHM Histogram\nHARV Field Site")
+
+# set 0 values to NA
+site_chm[site_chm == 0] <- NA
+
+# take another look at the histogram
+hist(site_chm, main="CHM Histogram\nHARV Field Site",
+     xlab="Height (m)")
+
+```
+
+## Then, I'm going to load in the insitu data
+
+```{r import-insitu }
+
+site_insitu <- read.csv("../NEONdata/D01-Massachusetts/HARV/2014/insitu/veg_structure/D01_2012_HARV_vegStr.csv", 
+                        header=TRUE, sep=",")
+
+# let's make sure the data came in okay
+head(site_insitu)  # lots of NA values
+
+# look at a histogram of the heights
+hist(site_insitu$stem_height, main="In Situ Histogram\nHARV Field Site",
+     xlab="Height (m)")  
+
+```
+
+In the insitu data, it looks like there's a lot more shorter vegetation than was captured in the CHM.
+
+## Load in the plot locations
+
+```{r plot-locations }
+
+# loading using readOGR
+
+site_plots <- readOGR("../NEONdata/D01-Massachusetts/HARV/vector_data/",
+                      "HARV_PlotCentroids")
+
+# look at the plot locations
+plot(site_plots)
+
+# overlay plot locations on CHM
+plot(site_chm, main="CHM with In Situ Locations\nHARV Field Site")
+plot(site_plots, add=TRUE)
+
+```
+
+# Following along with NEON tutorial on creating field data polygons from centroids.
+**Add link here**
+
+## Set up plot dimensions
+
+I'm going to set up square plots around the plot centroid. This process involves setting a radius, which will be half the length of one side of the square.
+
+This is based on the assumption that plots are oriented north and not rotated.
+
+```{r set-plot-dimensions }
+
+# first set radius
+
+radius <- 20  # in meters
+
+# then define the plot boundaries using the radius
+yPlus <- site_plots$Y + radius
+xPlus <- site_plots$X + radius
+yMinus <- site_plots$Y - radius
+xMinus <- site_plots$X - radius
+
+```
+
+## Extract Plot IDs from centroids
+
+```{r extract-plot-id }
+
+ID <- site_plots$plotID
+
+# let's look at our plot IDs
+ID
+
+```
+
+## Now I'm going to calculate square polygon coordinates for each plot centroid
+
+```{r polygon-coordinates }
+
+# here I am just making a list of the coordinates of each corner of the square
+# will follow x, y, x, y, etc.
+# later we will turn this into the 4 corners of the square the bounds the plot
+# this requires 5 corners to draw the square - why are there 6?
+
+square <- cbind(xMinus, yPlus, 
+                xPlus, yPlus, 
+                xPlus, yMinus, 
+                xMinus, yMinus, 
+                xMinus, yPlus,
+                xMinus, yPlus)
+
+```
+
+## Create spatial polygons using the coordinates
+
+```{r create-spatial-polygons }
+
+# Create a function to do this
+polys <- SpatialPolygons(mapply(function(poly, id) {
+  xy <- matrix(poly, ncol=2, byrow=TRUE)  # take a list and create a matrix
+  Polygons(list(Polygon(xy)), ID=id)
+}, split(square, row(square)), ID),proj4string=CRS(as.character("+proj=utm +zone=18 +datum=WGS84 +units=m +no_defs +ellps=WGS84 +towgs84=0,0,0")))
+
+```
+
+## Create shapefile
+
+This is an important step to extract the data.
+
+```{r create-shapefile }
+
+polys.df <- SpatialPolygonsDataFrame(polys, data.frame(id=ID, row.names=ID))
+
+```
+
+## Plot this with our CHM
+
+```{r plot-square-buffers }
+
+plot(site_chm, main="CHM with square in situ plots\nHARV Field Site")
+plot(polys.df, add=TRUE)
+
+```
+
+
+
+
+## Use square buffers to extract information from LiDAR data
+
+```{r extract-info-from-lidar }
+
+# extracting max height from CHM at field data sites
+chm_maxheight <- extract(site_chm, polys.df,
+                       fun=max, sp=TRUE,  # sp for return spatial object
+                       stringsasFactors=FALSE)
+
+# extract mean height from CHM at field data sites
+chm_meanheight <- extract(site_chm, polys.df,
+                       fun=mean, sp=TRUE,  # sp for return spatial object
+                       stringsasFactors=FALSE)
+
+# check outputs
+chm_maxheight@data
+chm_meanheight@data
+unique(site_insitu$plotid)
+
+```
+
+## Extract information from insitu data
+
+```{r extract-info-from-insitu, eval = FALSE}
+
+# extract max ht by plot from insitu data with dplyr
+insitu_maxheight <- site_insitu %>% 
+  group_by(plotid) %>%
+  summarise(max(stem_height))
+
+names(insitu_maxheight) <- c("plotid","max_height")
+
+hist(insitu_maxheight$max_height)
+hist(chm_maxheight@data$HARV_lidarCHM)
+
+# quick look at data summary
+summary(fieldmaxht.sjer)
+summary(height.sjer@data$SJER_lidarCHM)
+
+# update names
+names(fieldmaxht.sjer) <- c("plotid","field_maxht")
+
+
+```
+

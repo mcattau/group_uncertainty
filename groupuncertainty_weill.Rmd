@@ -1,0 +1,116 @@
+---
+title: "Group Uncertainty"
+author: "Allie Weill"
+date: "June 22, 2016"
+output: html_document
+---
+This is a group project focusing on uncertainty in LiDAR. We will look at the relationship between LiDAR derived stem heights and field based stem height measurements. Then, we will look at whether this error is related to canopy closure--ie, does a closed canopy block understory trees, leading to an overestimate of average tree height?
+
+## Load Libraries
+```{r}
+library(raster)
+library(rgdal)
+library(ggplot2)
+library(dplyr)
+```
+## Import Data
+```{r import-raster}
+site_chm <- raster("../NEONdata/D17-California/SOAP/2013/lidar/SOAP_lidarCHM.tif")
+# check it out
+hist(site_chm)
+# set zeroes to NA
+site_chm[site_chm==0] <- NA
+# check it again
+hist(site_chm)
+```
+
+## Open Plot locations
+```{r open-plots}
+# import plot centroids (vector layer, x-y point locations), DON'T USE FILE EXTENSION IN NAME!! need shx, shp, and dbf. prj is extra but gives you CRS
+plots <- readOGR("../NEONdata/D17-California/SOAP/vector_data/SOAP_centroids_base/","SOAP_centroids_base")
+## check it out
+plot(plots)
+str(plots)
+## Plot Canopy Height Model
+```{r plot-chm-points}
+#first plot CHM and then plot points on top
+plot(site_chm)
+plot(plots, 
+     add=T)
+```
+## Extract Raster Data
+```{r extract-raster-data}
+# 
+site.ht <- extract(site_chm, 
+                   plots,
+                   buffer = 20,
+                   fun = mean,#function is mean value
+                   sp = TRUE, #give spatial object back
+                   stringAsFactors = FALSE)
+# check it out--has a dataframe as well as points.
+
+head(site.ht)
+```
+
+
+## Import Field Data
+```{r import-field-data}
+vegstr <-  read.csv("../NEONdata/D17-California/SOAP/2013/insitu/veg-structure/D17_2013_SOAP_vegStr.csv",
+                      stringsAsFactors = FALSE)
+head(vegstr)
+```
+## Get mean height of field data
+```{r }
+## extract mean height by creating a pipe
+meanHt <- vegstr %>%
+  group_by(plotid) %>%
+  summarize(mean(stemheight))
+str(meanHt)
+## make names clearer for merge
+names(meanHt) <- c("plotid","insMeanHt")
+meanHt
+nrow(vegstr)
+unique(vegstr$plotid)
+```
+##Match IDS
+```{r match-IDs}
+IDspl <- strsplit(as.character(site.ht$ID), "_",fixed=FALSE)
+ID_df <- matrix(unlist(IDspl),ncol=3,byrow=TRUE)
+site.ht$newID <- ID_df[,1] 
+head(site.ht)
+site.ht$newID
+#now for meanHt
+IDspl <- strsplit(as.character(meanHt$plotid), "P",fixed=FALSE)
+ID_df <- matrix(unlist(IDspl),ncol=2,byrow=TRUE)
+meanHt$newID <- ID_df[,2] 
+meanHt$newID
+```
+
+
+
+## Create Merged Data Frame including LiDAR and measured height
+```{r merge-data}
+## we could just merge and get a table, but we want to keep the spatial object part, so we replace the spatial object only
+site.ht@data <- data.frame(site.ht@data,
+                           meanHt[match(site.ht@data[,"newID"],
+                                          meanHt$newID),])
+# check it out
+head(site.ht)
+```
+
+## Plot LiDAR vs insitu
+```{r plot-lidar-vs-ins}
+
+ggplot(site.ht@data, aes(x=SOAP_lidarCHM, y = insMeanHt)) +
+  geom_point() +
+  theme_bw() +
+  ylab("Mean measured height") +
+  xlab("Mean LiDAR pixel")+
+  geom_abline(intercept = 0, slope=1) +
+  ggtitle("Lidar Height Compared to InSitu Measured Height") +
+  xlim(c(0,30)) +
+  ylim(c(0,30))
+site.ht@data
+```
+
+
