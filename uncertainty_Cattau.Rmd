@@ -28,6 +28,8 @@ library(rgdal)
 library(ggplot2)
 library(dplyr)
 library(sp)
+install.packages("hydroGOF")
+library(hydroGOF)
 ```
 
 Load LiDAR CHM raster and remove 0s
@@ -114,37 +116,73 @@ mean_height@data # this is the dataframe
 ```
 
 
-
-Extract tallest tree for each plot 
-
+Extract mean and tallest tree for each plot 
 ```{r field-measurements-stats}
 
-# We need to get max tree height for each plot, so extract max value for each plotid
-insitu_max_stem_height<-sjer_insitu %>% 
+# We need to get mean and max tree height for each plot, so extract mean and max values for each plotid
+insitu_max_stem_height<-site_insitu %>% 
   group_by(plotid) %>% 
   summarise(max(stemheight))
 # take the df and group by plot id, and for each group, give max value
 names(insitu_max_stem_height)<-c("plotid", "insitu_maxHt") # rename columns
+
+insitu_mean_stem_height<-site_insitu %>% 
+  group_by(plotid) %>% 
+  summarise(mean(stemheight))
+# take the df and group by plot id, and for each group, give max value
+names(insitu_mean_stem_height)<-c("plotid", "insitu_meanHt") # rename columns
 ```
 
-Merge data in spatial df with max stem height table
+Merge data in spatial df with mean and max stem height table
 ```{r merge-data}
 # Merge the data together so each point location has LiDAR CHM and insitu measurements
-# first, replace data in spatial points object w new data frame
-# then, make a new dataframe that's the Plot ID data in spatial points object (sjer_height) with plo???
-sjer_height@data<-data.frame(sjer_height@data, insitu_max_stem_height[match(sjer_height@data[,"Plot_ID"],insitu_max_stem_height$plotid),])
-# used to be that you had to do this to get a spatial object, but now maybe regular merge does that???
-merged.data<-merge(sjer_height, insitu_max_stem_height, by.x="Plot_ID", by.y="plotid")
+merged.max.height<-merge(max_height@data, insitu_max_stem_height, by.x="Plot_ID", by.y="plotid")
+
+merged.mean.height<-merge(mean_height@data, insitu_mean_stem_height, by.x="Plot_ID", by.y="plotid")
 
 
 # plot data
-ggplot(sjer_height@data, aes(x=SJER_lidarCHM, y=insitu_maxHt))+geom_point()
+ggplot(merged.max.height, aes(x=SJER_lidarCHM, y=insitu_maxHt))+geom_point()
+ggplot(merged.mean.height, aes(x=SJER_lidarCHM, y=insitu_meanHt))+geom_point()
 ```
+
+
+# quantify error
+```{r quantify-errors}
+# RMSE for mean and max
+rmse(merged.max.height$SJER_lidarCHM, merged.max.height$insitu_maxHt)
+# 3.459163
+mean(merged.max.height$SJER_lidarCHM) #14.46222
+mean(merged.max.height$insitu_maxHt) #13.98333
+# mean plot-level mean canopy height is lower in the measured data than LiDAR
+
+rmse(merged.mean.height$SJER_lidarCHM, merged.mean.height$insitu_meanHt) # 3.939722
+mean(merged.mean.height$SJER_lidarCHM) #7.559299
+mean(merged.mean.height$insitu_meanHt) #5.605737
+# mean plot-level mean canopy height is also lower in the measured data than LiDAR. Statistically?
+
+
+# RMSE is higher with mean canopy height than max canopy height (LiDAR captures max canopy height better than mean canopy heigh), presumably because the data misses understory vegetation
+```
+
+
+# Does RMSE vary ~ plot-level canopy closure?
+```{r make_canopy_closure_variable}
+
+#subset just tall trees
+tall_trees<-
+insitu_canopy_closure<-site_insitu %>% 
+  group_by(plotid) %>% 
+  summarise(mean(stemheight))
+# take the df and group by plot id, and for each group, give max value
+names(insitu_mean_stem_height)<-c("plotid", "insitu_meanHt") # rename columns
+```
+
+
 
 
 
 # next: explore outliers to see what's going on
-
 # canopy closure is canopy diameter of stems over a certain height
 
 
