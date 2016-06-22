@@ -1,0 +1,10 @@
+---
+title: "group_uncertainty"
+author: "Megan Cattau"
+date: "June 22, 2016"
+output: html_document
+---
+
+Ideas: Match stems to pixels, etc.
+
+# Is there a relationship between mismatch between LiDAR-measured vegetation height distributions and ground-measured vegetation height distributions as a function of canopy closure?
