@@ -201,17 +201,23 @@ tree_height$canopy_area<-pi*(tree_height$maxcanopydiam/2)*(tree_height$canopydia
 canopy_closure<-aggregate(canopy_area~plotid, data=tree_height, sum)
 hist(canopy_closure$canopy_area)
 
-# plot of  ~ canopy closure
+# plot of difference between LiDAR and ground ~ canopy closure
 # take the df and group by plot id, and for each group, give max value
-names(insitu_mean_stem_height)<-c("plotid", "insitu_meanHt") # rename columns
+
 ```
 
+merged.max.height$diff_max<-merged.max.height$SJER_lidarCHM-merged.max.height$insitu_maxHt
 
+merged.mean.height$diff_mean<-merged.mean.height$SJER_lidarCHM-merged.mean.height$insitu_meanHt
 
+par(mfrow=c(2,1))
+plot(merged.max.height$diff_max~canopy_closure$canopy_area)
+abline(lm(merged.max.height$diff_max~canopy_closure$canopy_area))
+plot(merged.mean.height$diff_mean~canopy_closure$canopy_area)
+abline(lm(merged.mean.height$diff_mean~canopy_closure$canopy_area))
 
 
 # next: explore outliers to see what's going on
-# canopy closure is canopy diameter of stems over a certain height
-
+# per tree basis?
 
 
