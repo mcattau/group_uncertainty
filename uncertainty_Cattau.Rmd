@@ -5,6 +5,147 @@ date: "June 22, 2016"
 output: html_document
 ---
 
+We want to compare data that we collected on the ground with LiDAR-derived raster data
+We need to extract data from a spatial object
+
+
 Ideas: Match stems to pixels, etc.
 
 # Is there a relationship between mismatch between LiDAR-measured vegetation height distributions and ground-measured vegetation height distributions as a function of canopy closure?
+
+Compare height distributions 
+
+
+Load packages and data
+
+```{r load_packages}
+# Check working directory
+getwd()
+
+# Load our packages
+library(raster)
+library(rgdal)
+library(ggplot2)
+library(dplyr)
+library(sp)
+```
+
+Load LiDAR CHM raster and remove 0s
+```{r load_CHM}
+# Load LiDAR CHM raster
+site_chm<-raster("../NEONdata/D17-California/SJER/2013/lidar/SJER_lidarCHM.tif")
+# look at it
+hist(site_chm)
+
+# set 0 values to no data
+site_chm[site_chm==0]<-NA
+```
+
+Load ground-based measurements
+```{r import-field-measurements}
+# Import csv field data
+site_insitu<-read.csv("../NEONdata/D17-California/SJER/2013/insitu/veg_structure/D17_2013_SJER_vegStr.csv", stringsAsFactors = FALSE) # this is a dataframe
+head(site_insitu)
+```
+
+Load plot locations
+```{r load_plot_locations}
+
+plots<-readOGR("../NEONdata/D17-California/SJER/vector_data/", "SJER_plot_centroids")
+plot(plots)
+str(plots)
+# check to see if there is spatial info
+plots
+```
+
+Make the plots rectangular ploygons - FAIL!
+```{r make-plots-square-fail}
+# Define plot boundaries
+yPlus <- plot_centroids$northing+20
+xPlus <- plot_centroids$easting+20
+yMinus <- plot_centroids$northing-20
+xMinus <- plot_centroids$easting-20
+
+#Extract the plot ID information
+ID=as.character(plot_centroids$Plot_ID) 
+
+#calculate polygon coordinates for each plot centroid. 
+square=cbind(xMinus,yPlus, xPlus,yPlus, xPlus,yMinus, xMinus,yMinus,xMinus,yPlus)
+
+#create spatial polygons
+site_plots <- SpatialPolygons(
+  mapply(
+    function(poly, id) {
+  xy <- matrix(poly, ncol=2, byrow=TRUE)
+  Polygons(list(Polygon(xy)), ID=id)
+}, 
+split(square, row(square)), ID),
+proj4string=CRS(as.character("+proj=utm +zone=11 +datum=WGS84 +units=m +no_defs +ellps=WGS84 +towgs84=0,0,0"))
+)
+
+plot(site_plots)
+plot(site_chm)
+plot(site_plots, add=TRUE)
+```
+
+Extract data from LiDAR CHM raster at plots - max and mean heights
+```{r extract_CHM_from_plots}
+# We're going to extract the mean LiDAR CHM data at the points of the plots
+max_height<-extract(site_chm, 
+                     plots,
+                     buffer=20,
+                     fun=max,# we're going to compare max height, so specify fun = max below. You could compare anything or not include a function to get full distribution
+                     sp=TRUE, # we want a spatial object
+                     stringAsFactors=F # avoid num to characters
+                     )
+plot(max_height)
+max_height@data # this is the dataframe
+
+# We're going to extract the sd LiDAR CHM data at the points of the plots
+mean_height<-extract(site_chm, 
+                     plots,
+                     buffer=20,
+                     fun=mean,# we're going to compare max height, so specify fun = max below. You could compare anything or not include a function to get full distribution
+                     sp=TRUE, # we want a spatial object
+                     stringAsFactors=F # avoid num to characters
+                     )
+plot(mean_height)
+mean_height@data # this is the dataframe
+```
+
+
+
+Extract tallest tree for each plot 
+
+```{r field-measurements-stats}
+
+# We need to get max tree height for each plot, so extract max value for each plotid
+insitu_max_stem_height<-sjer_insitu %>% 
+  group_by(plotid) %>% 
+  summarise(max(stemheight))
+# take the df and group by plot id, and for each group, give max value
+names(insitu_max_stem_height)<-c("plotid", "insitu_maxHt") # rename columns
+```
+
+Merge data in spatial df with max stem height table
+```{r merge-data}
+# Merge the data together so each point location has LiDAR CHM and insitu measurements
+# first, replace data in spatial points object w new data frame
+# then, make a new dataframe that's the Plot ID data in spatial points object (sjer_height) with plo???
+sjer_height@data<-data.frame(sjer_height@data, insitu_max_stem_height[match(sjer_height@data[,"Plot_ID"],insitu_max_stem_height$plotid),])
+# used to be that you had to do this to get a spatial object, but now maybe regular merge does that???
+merged.data<-merge(sjer_height, insitu_max_stem_height, by.x="Plot_ID", by.y="plotid")
+
+
+# plot data
+ggplot(sjer_height@data, aes(x=SJER_lidarCHM, y=insitu_maxHt))+geom_point()
+```
+
+
+
+# next: explore outliers to see what's going on
+
+# canopy closure is canopy diameter of stems over a certain height
+
+
+
